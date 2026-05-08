@@ -29,9 +29,11 @@ class ImageClassificationSystem:
         self.model = None 
         self.label_encoder = None 
         self.class_names = [] 
-        self.image_size = (160, 160)
+        self.image_size = (96, 96)  # Reduced from 160x160 for faster processing
         self.training_history = None 
         self.class_distribution = {} 
+        self.confidence_threshold = 0.85  # Very strict: reject unless 85%+ confident
+        self.dataset_image_ids = set()    # Store IDs from the CSV
          
         # Configure style 
         style = ttk.Style() 
@@ -97,10 +99,6 @@ class ImageClassificationSystem:
         ttk.Label(train_frame, text="Training:").grid(row=0, column=0, padx=5) 
         ttk.Button(train_frame, text="Load CSV & Train Model",  
                   command=self.load_and_train).grid(row=0, column=1, padx=5) 
-        ttk.Button(train_frame, text="Save Model",  
-                  command=self.save_model).grid(row=0, column=2, padx=5) 
-        ttk.Button(train_frame, text="Load Model",  
-                  command=self.load_model).grid(row=0, column=3, padx=5) 
          
         # Classification Section 
         classify_frame = ttk.Frame(control_frame) 
@@ -109,18 +107,30 @@ class ImageClassificationSystem:
         ttk.Label(classify_frame, text="Classification:").grid(row=0, column=0, padx=5) 
         ttk.Button(classify_frame, text="Load Single Image",  
                   command=self.classify_single_image).grid(row=0, column=1, padx=5) 
-        ttk.Button(classify_frame, text="Batch Classify Folder",  
-                  command=self.batch_classify).grid(row=0, column=2, padx=5) 
+        
+        # Confidence Threshold Section
+        threshold_frame = ttk.Frame(control_frame)
+        threshold_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=5)
+        
+        ttk.Label(threshold_frame, text="Reject if confidence <").grid(row=0, column=0, padx=5)
+        self.threshold_var = tk.DoubleVar(value=self.confidence_threshold)
+        self.threshold_scale = ttk.Scale(threshold_frame, from_=0, to=1, orient='horizontal',
+                                         variable=self.threshold_var, command=self.update_threshold)
+        self.threshold_scale.grid(row=0, column=1, padx=5, sticky=(tk.W, tk.E))
+        
+        self.threshold_label = ttk.Label(threshold_frame, text=f"{self.confidence_threshold:.0%}", font=('Arial', 11, 'bold'), foreground='red')
+        self.threshold_label.grid(row=0, column=2, padx=5)
          
         # Info Label 
         self.info_label = ttk.Label(control_frame, text="Ready", foreground="gray") 
-        self.info_label.grid(row=2, column=0, pady=(10, 0)) 
+        self.info_label.grid(row=3, column=0, pady=(10, 0)) 
          
         # Middle container for side-by-side display 
         mid_container = ttk.Frame(main_container) 
-        mid_container.grid(row=3, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10)) 
+        mid_container.grid(row=4, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(0, 10)) 
         mid_container.columnconfigure(0, weight=1) 
         mid_container.columnconfigure(1, weight=1) 
+        mid_container.columnconfigure(2, weight=1) 
         mid_container.rowconfigure(0, weight=1) 
  
         # Display Area 
@@ -130,7 +140,7 @@ class ImageClassificationSystem:
         display_frame.rowconfigure(0, weight=1) 
          
         # Canvas for image display 
-        self.canvas = tk.Canvas(display_frame, bg='#f0f0f0', width=640, height=440, highlightthickness=0) 
+        self.canvas = tk.Canvas(display_frame, bg='#f0f0f0', width=300, height=400, highlightthickness=0) 
         self.canvas.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S)) 
          
         # Scrollbar for canvas 
@@ -146,16 +156,19 @@ class ImageClassificationSystem:
         results_frame.rowconfigure(0, weight=1) 
          
         # Text widget for results 
-        self.results_text = tk.Text(results_frame, wrap=tk.WORD) 
+        self.results_text = tk.Text(results_frame, wrap=tk.WORD, width=30, height=20) 
         self.results_text.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S)) 
          
         scrollbar_text = ttk.Scrollbar(results_frame, orient=tk.VERTICAL, command=self.results_text.yview) 
         scrollbar_text.grid(row=0, column=1, sticky=(tk.N, tk.S)) 
         self.results_text.configure(yscrollcommand=scrollbar_text.set) 
          
+        # Prediction Pie Chart Area
+        self.create_prediction_pie_plot(mid_container)
+         
         # Visualization Area 
         self.viz_frame = ttk.LabelFrame(main_container, text="Visualizations", padding="10") 
-        self.viz_frame.grid(row=4, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(10, 0)) 
+        self.viz_frame.grid(row=5, column=0, sticky=(tk.W, tk.E, tk.N, tk.S), pady=(10, 0)) 
         self.viz_frame.columnconfigure(0, weight=1) 
         self.viz_frame.columnconfigure(1, weight=1) 
         self.viz_frame.rowconfigure(0, weight=1) 
@@ -165,6 +178,11 @@ class ImageClassificationSystem:
          
         # Class Distribution Plot 
         self.create_class_distribution_plot() 
+    
+    def update_threshold(self, value):
+        """Update confidence threshold when slider is moved"""
+        self.confidence_threshold = float(value)
+        self.threshold_label.config(text=f"{self.confidence_threshold:.0%}")
      
     def create_training_plot(self): 
         """Create training history visualization frame""" 
@@ -173,29 +191,17 @@ class ImageClassificationSystem:
         plot_frame.columnconfigure(0, weight=1) 
         plot_frame.rowconfigure(0, weight=1) 
          
-        self.training_canvas = tk.Canvas(plot_frame, bg='#f5f5f5', width=680, height=320, highlightthickness=0) 
-        self.training_canvas.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S)) 
-        training_v_scroll = ttk.Scrollbar(plot_frame, orient=tk.VERTICAL, command=self.training_canvas.yview) 
-        training_v_scroll.grid(row=0, column=1, sticky=(tk.N, tk.S)) 
-        training_h_scroll = ttk.Scrollbar(plot_frame, orient=tk.HORIZONTAL, command=self.training_canvas.xview) 
-        training_h_scroll.grid(row=1, column=0, sticky=(tk.W, tk.E)) 
-        self.training_canvas.configure(yscrollcommand=training_v_scroll.set, xscrollcommand=training_h_scroll.set) 
-         
-        training_inner = ttk.Frame(self.training_canvas) 
-        self.training_canvas.create_window((0, 0), window=training_inner, anchor='nw') 
-        training_inner.bind("<Configure>", lambda event: self.training_canvas.configure(scrollregion=self.training_canvas.bbox("all"))) 
-         
-        self.fig_training = Figure(figsize=(10, 4.5), facecolor='#f5f5f5') 
+        self.fig_training = Figure(figsize=(5, 3.5), dpi=100, facecolor='#f5f5f5') 
         self.ax_training = self.fig_training.add_subplot(111) 
         self.ax_training.set_title('Accuracy & Loss Over Epochs') 
         self.ax_training.set_xlabel('Epoch') 
         self.ax_training.set_ylabel('Value') 
         self.ax_training.grid(True, alpha=0.3) 
          
-        self.canvas_training = FigureCanvasTkAgg(self.fig_training, training_inner) 
+        self.canvas_training = FigureCanvasTkAgg(self.fig_training, plot_frame) 
         widget_training = self.canvas_training.get_tk_widget() 
-        widget_training.pack() 
-        widget_training.config(width=960, height=360) 
+        widget_training.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S)) 
+        self.fig_training.tight_layout() 
      
     def create_class_distribution_plot(self): 
         """Create class distribution visualization frame""" 
@@ -204,29 +210,62 @@ class ImageClassificationSystem:
         dist_frame.columnconfigure(0, weight=1) 
         dist_frame.rowconfigure(0, weight=1) 
          
-        self.dist_canvas = tk.Canvas(dist_frame, bg='#f5f5f5', width=680, height=320, highlightthickness=0) 
-        self.dist_canvas.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S)) 
-        dist_v_scroll = ttk.Scrollbar(dist_frame, orient=tk.VERTICAL, command=self.dist_canvas.yview) 
-        dist_v_scroll.grid(row=0, column=1, sticky=(tk.N, tk.S)) 
-        dist_h_scroll = ttk.Scrollbar(dist_frame, orient=tk.HORIZONTAL, command=self.dist_canvas.xview) 
-        dist_h_scroll.grid(row=1, column=0, sticky=(tk.W, tk.E)) 
-        self.dist_canvas.configure(yscrollcommand=dist_v_scroll.set, xscrollcommand=dist_h_scroll.set) 
-         
-        dist_inner = ttk.Frame(self.dist_canvas) 
-        self.dist_canvas.create_window((0, 0), window=dist_inner, anchor='nw') 
-        dist_inner.bind("<Configure>", lambda event: self.dist_canvas.configure(scrollregion=self.dist_canvas.bbox("all"))) 
-         
-        self.fig_dist = Figure(figsize=(10, 4.5), facecolor='#f5f5f5') 
+        self.fig_dist = Figure(figsize=(5, 3.5), dpi=100, facecolor='#f5f5f5') 
         self.ax_dist = self.fig_dist.add_subplot(111) 
         self.ax_dist.set_title('Images per Class') 
         self.ax_dist.set_xlabel('Class') 
         self.ax_dist.set_ylabel('Count') 
         self.ax_dist.grid(True, alpha=0.3) 
          
-        self.canvas_dist = FigureCanvasTkAgg(self.fig_dist, dist_inner) 
+        self.canvas_dist = FigureCanvasTkAgg(self.fig_dist, dist_frame) 
         widget_dist = self.canvas_dist.get_tk_widget() 
-        widget_dist.pack() 
-        widget_dist.config(width=960, height=360) 
+        widget_dist.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S)) 
+        self.fig_dist.tight_layout() 
+
+    def create_prediction_pie_plot(self, parent):
+        """Create prediction probability pie chart frame"""
+        pie_frame = ttk.LabelFrame(parent, text="Prediction Confidence", padding="5")
+        pie_frame.grid(row=0, column=2, sticky=(tk.W, tk.E, tk.N, tk.S), padx=(5, 0))
+        pie_frame.columnconfigure(0, weight=1)
+        pie_frame.rowconfigure(0, weight=1)
+        
+        self.fig_pie = Figure(figsize=(3, 3), dpi=100, facecolor='#f5f5f5')
+        self.ax_pie = self.fig_pie.add_subplot(111)
+        self.ax_pie.set_title('Confidence Distribution')
+        
+        self.canvas_pie = FigureCanvasTkAgg(self.fig_pie, pie_frame)
+        self.widget_pie = self.canvas_pie.get_tk_widget()
+        self.widget_pie.grid(row=0, column=0, sticky=(tk.W, tk.E, tk.N, tk.S))
+        self.fig_pie.tight_layout()
+
+    def update_prediction_pie(self, predictions):
+        """Update prediction pie chart with current results"""
+        if self.class_names is None or len(self.class_names) == 0:
+            return
+            
+        self.ax_pie.clear()
+        
+        # Filter classes with significant probability (> 1%)
+        labels = []
+        sizes = []
+        for i, prob in enumerate(predictions):
+            if prob > 0.01:
+                labels.append(self.class_names[i])
+                sizes.append(prob)
+        
+        # If everything is low, just show the top one
+        if not labels:
+            idx = np.argmax(predictions)
+            labels = [self.class_names[idx]]
+            sizes = [predictions[idx]]
+            
+        colors = plt.cm.Set3(np.linspace(0, 1, len(labels)))
+        self.ax_pie.pie(sizes, labels=labels, autopct='%1.1f%%', startangle=140, colors=colors,
+                        textprops={'fontsize': 8})
+        self.ax_pie.set_title('Prediction Confidence')
+        
+        self.fig_pie.tight_layout()
+        self.canvas_pie.draw()
      
     def update_training_plot(self, history): 
         """Update training history plot with new data""" 
@@ -245,6 +284,7 @@ class ImageClassificationSystem:
         self.ax_training.legend(loc='lower right') 
         self.ax_training.grid(True, alpha=0.3) 
          
+        self.fig_training.tight_layout() 
         self.canvas_training.draw() 
          
         # Also create loss plot in a new figure 
@@ -300,6 +340,7 @@ class ImageClassificationSystem:
                              str(count), ha='center', va='bottom', fontsize=9) 
          
         self.ax_dist.grid(True, alpha=0.3, axis='y') 
+        self.fig_dist.tight_layout() 
         self.canvas_dist.draw() 
          
         self.class_distribution = class_counts 
@@ -488,8 +529,10 @@ class ImageClassificationSystem:
                 messagebox.showerror("Error", f"CSV must contain a 'label', 'class', or 'category' column.\nFound: {list(df.columns)}") 
                 return 
              
-            self.results_text.insert(tk.END, f"Using '{image_col}' as image identifier column\n") 
             self.results_text.insert(tk.END, f"Using '{label_col}' as label column\n\n") 
+             
+            # Store all image IDs from CSV for later verification
+            self.dataset_image_ids = set(df[image_col].astype(str).str.strip().tolist())
              
             # Create filename mapping for faster lookup 
             filename_mapping = self.create_filename_mapping(folder_path) 
@@ -649,8 +692,8 @@ class ImageClassificationSystem:
             history = self.model.fit( 
                 X_train, y_train, 
                 validation_data=(X_val, y_val), 
-                epochs=30, 
-                batch_size=min(32, len(X_train)), 
+                epochs=20,           # Reduced epochs
+                batch_size=min(64, len(X_train)), # Increased batch size
                 verbose=1, 
                 callbacks=callbacks 
             ) 
@@ -703,42 +746,6 @@ class ImageClassificationSystem:
             import traceback 
             traceback.print_exc() 
      
-    def save_model(self): 
-        """Save trained model""" 
-        if self.model is None: 
-            messagebox.showwarning("Warning", "No model to save. Train or load a model first.") 
-            return 
-         
-        file_path = filedialog.asksaveasfilename( 
-            defaultextension=".h5", 
-            filetypes=[("HDF5 files", "*.h5"), ("All files", "*.*")] 
-        ) 
-         
-        if file_path: 
-            self.model.save(file_path) 
-            # Save class names 
-            if self.class_names: 
-                np.save(file_path.replace('.h5', '_classes.npy'), self.class_names) 
-            messagebox.showinfo("Success", f"Model saved to {file_path}") 
-     
-    def load_model(self): 
-        """Load pre-trained model""" 
-        file_path = filedialog.askopenfilename( 
-            title="Select model file", 
-            filetypes=[("HDF5 files", "*.h5"), ("All files", "*.*")] 
-        ) 
-         
-        if file_path: 
-            try: 
-                self.model = keras.models.load_model(file_path) 
-                classes_path = file_path.replace('.h5', '_classes.npy') 
-                if os.path.exists(classes_path): 
-                    self.class_names = np.load(classes_path, allow_pickle=True) 
-                self.info_label.config(text=f"Model loaded from {os.path.basename(file_path)}",  
-                                      foreground="green") 
-                messagebox.showinfo("Success", "Model loaded successfully!") 
-            except Exception as e: 
-                messagebox.showerror("Error", f"Failed to load model: {str(e)}") 
      
     def classify_single_image(self): 
         """Classify a single image""" 
@@ -753,6 +760,14 @@ class ImageClassificationSystem:
          
         if file_path: 
             try: 
+                # Check if image is in dataset
+                image_id = os.path.splitext(os.path.basename(file_path))[0]
+                full_filename = os.path.basename(file_path)
+                
+                if image_id not in self.dataset_image_ids and full_filename not in self.dataset_image_ids:
+                    messagebox.showerror("Error", "it's not belong in the dataset or not including on training")
+                    return
+
                 # Load and preprocess image 
                 img = cv2.imread(file_path) 
                 if img is None: 
@@ -773,116 +788,59 @@ class ImageClassificationSystem:
                 predicted_class_idx = np.argmax(predictions[0]) 
                 confidence = predictions[0][predicted_class_idx] 
                 predicted_label = self.class_names[predicted_class_idx] 
+                
+                # Update pie chart
+                self.update_prediction_pie(predictions[0])
                  
                 # Display results 
                 result_text = f"\n{'='*50}\n" 
                 result_text += f"CLASSIFICATION RESULT\n" 
                 result_text += f"{'='*50}\n" 
-                result_text += f"Image: {os.path.basename(file_path)}\n" 
-                result_text += f"Predicted Class: {predicted_label}\n" 
-                result_text += f"Confidence: {confidence:.2%}\n\n" 
-                 
-                # Show top 3 predictions 
-                result_text += "Top 3 Predictions:\n" 
-                top_indices = np.argsort(predictions[0])[-3:][::-1] 
-                for idx in top_indices: 
-                    result_text += f"  • {self.class_names[idx]}: {predictions[0][idx]:.2%}\n" 
-                result_text += f"{'='*50}\n\n" 
-                 
-                self.results_text.insert(tk.END, result_text) 
-                self.results_text.see(tk.END) 
-                 
-                self.info_label.config(text=f"Classified as: {predicted_label} ({confidence:.2%})",  
-                                      foreground="blue") 
+                result_text += f"Image: {os.path.basename(file_path)}\n"
+                
+                # Check if confidence is too low (not in database)
+                if confidence < self.confidence_threshold:
+                    result_text += f" NOT IN DATABASE - Image Not Recognized\n"
+                    result_text += f"{'='*50}\n\n"
+                    result_text += f"  REJECTED: Confidence {confidence:.2%} is below threshold ({self.confidence_threshold:.0%})\n\n"
+                    result_text += f"This image doesn't match any trained class well enough.\n"
+                    result_text += f"Possible reasons:\n"
+                    result_text += f"  • Image is not clothing\n"
+                    result_text += f"  • Image is not in the training dataset\n"
+                    result_text += f"  • Image quality is too different\n\n"
+                    result_text += f"All prediction scores:\n"
+                    for idx in range(len(self.class_names)):
+                        result_text += f"  • {self.class_names[idx]}: {predictions[0][idx]:.2%}\n"
+                    result_text += f"{'='*50}\n\n"
+                    
+                    self.results_text.insert(tk.END, result_text) 
+                    self.results_text.see(tk.END) 
+                    self.info_label.config(text=f" REJECTED - Not in database",  
+                                          foreground="red")
+                    messagebox.showwarning("Not Recognized", 
+                                          f"This image is NOT in the database.\n\n"
+                                          f"Confidence: {confidence:.2%}\n"
+                                          f"Required: {self.confidence_threshold:.0%}")
+                else:
+                    result_text += f"✓ Predicted Class: {predicted_label}\n" 
+                    result_text += f"Confidence: {confidence:.2%}\n\n" 
+                     
+                    # Show top 3 predictions 
+                    result_text += "Top 3 Predictions:\n" 
+                    top_indices = np.argsort(predictions[0])[-3:][::-1] 
+                    for idx in top_indices: 
+                        result_text += f"  • {self.class_names[idx]}: {predictions[0][idx]:.2%}\n" 
+                    result_text += f"{'='*50}\n\n" 
+                     
+                    self.results_text.insert(tk.END, result_text) 
+                    self.results_text.see(tk.END) 
+                     
+                    self.info_label.config(text=f"✓ Classified as: {predicted_label} ({confidence:.2%})",  
+                                          foreground="green") 
                  
             except Exception as e: 
                 messagebox.showerror("Error", f"Classification failed: {str(e)}") 
      
-    def batch_classify(self): 
-        """Classify all images in a folder""" 
-        if self.model is None: 
-            messagebox.showwarning("Warning", "No model loaded. Please load or train a model first.") 
-            return 
-         
-        folder_path = filedialog.askdirectory(title="Select folder with images to classify") 
-        if not folder_path: 
-            return 
-             
-        results = [] 
-        image_extensions = ('.jpg', '.jpeg', '.png', '.bmp', '.tiff', '.tif') 
-         
-        # Get list of image files 
-        image_files = [f for f in os.listdir(folder_path) if f.lower().endswith(image_extensions)] 
-         
-        if not image_files: 
-            messagebox.showwarning("Warning", "No image files found in selected folder!") 
-            return 
-         
-        self.info_label.config(text=f"Classifying {len(image_files)} images...", foreground="orange") 
-        self.root.update() 
-         
-        for filename in image_files: 
-            img_path = os.path.join(folder_path, filename) 
-            try: 
-                img = cv2.imread(img_path) 
-                if img is not None: 
-                    img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB) 
-                    img_resized = cv2.resize(img, self.image_size) 
-                    img_normalized = img_resized / 255.0 
-                    img_batch = np.expand_dims(img_normalized, axis=0) 
-                     
-                    predictions = self.model.predict(img_batch, verbose=0) 
-                    predicted_class_idx = np.argmax(predictions[0]) 
-                    confidence = predictions[0][predicted_class_idx] 
-                     
-                    results.append({ 
-                        'image': filename, 
-                        'predicted_class': self.class_names[predicted_class_idx], 
-                        'confidence': confidence 
-                    }) 
-                else: 
-                    results.append({ 
-                        'image': filename, 
-                        'predicted_class': 'Error', 
-                        'confidence': 'Failed to load image' 
-                    }) 
-            except Exception as e: 
-                results.append({ 
-                    'image': filename, 
-                    'predicted_class': 'Error', 
-                    'confidence': f'Failed: {str(e)[:50]}' 
-                }) 
-         
-        # Display results 
-        self.results_text.insert(tk.END, f"\n{'='*50}\n") 
-        self.results_text.insert(tk.END, f"BATCH CLASSIFICATION RESULTS\n") 
-        self.results_text.insert(tk.END, f"{'='*50}\n") 
-        self.results_text.insert(tk.END, f"Total images processed: {len(results)}\n\n") 
-         
-        # Group by predicted class 
-        class_counts = {} 
-        for r in results: 
-            if r['predicted_class'] not in ['Error']: 
-                class_counts[r['predicted_class']] = class_counts.get(r['predicted_class'], 0) + 1 
-         
-        if class_counts: 
-            self.results_text.insert(tk.END, "Summary by class:\n") 
-            for class_name, count in sorted(class_counts.items()): 
-                self.results_text.insert(tk.END, f"  • {class_name}: {count} images\n") 
-            self.results_text.insert(tk.END, "\n") 
-         
-        self.results_text.insert(tk.END, "Detailed results:\n") 
-        self.results_text.insert(tk.END, "-" * 50 + "\n") 
-        for r in results: 
-            if isinstance(r['confidence'], float): 
-                self.results_text.insert(tk.END, f"{r['image']}: {r['predicted_class']} ({r['confidence']:.2%})\n") 
-            else: 
-                self.results_text.insert(tk.END, f"{r['image']}: {r['predicted_class']} - {r['confidence']}\n") 
-        self.results_text.insert(tk.END, f"\n{'='*50}\n\n") 
-         
-        self.results_text.see(tk.END) 
-        self.info_label.config(text=f"Classified {len(results)} images successfully", foreground="green") 
-        messagebox.showinfo("Complete", f"Classified {len(results)} images successfully!") 
      
     def display_image(self, image): 
         """Display image on canvas""" 
