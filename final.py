@@ -35,10 +35,32 @@ class ImageClassificationSystem:
         self.confidence_threshold = 0.85  # Very strict: reject unless 85%+ confident
         self.dataset_image_ids = set()    # Store IDs from the CSV
          
-        # Configure style 
-        style = ttk.Style() 
-        style.theme_use('clam') 
-         
+        # Vibrant Sky Blue Palette
+        self.colors = {
+            'p': '#0ea5e9',      # Primary Sky Blue
+            'ph': '#0284c7',     # Hover
+            'bg': '#f1f5f9',     # Soft Blue-Gray BG
+            'box': '#ffffff',    # White Card
+            'txt': '#1e293b',    # Slate Text
+            'brd': '#e0f2fe'     # Border
+        }
+        self.root.configure(bg=self.colors['bg'])
+        
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure('TFrame', background=self.colors['bg'])
+        style.configure('Box.TFrame', background=self.colors['box'])
+        style.configure('TLabel', background=self.colors['bg'], foreground=self.colors['txt'], font=('Arial', 10))
+        style.configure('Box.TLabel', background=self.colors['box'], foreground=self.colors['txt'], font=('Arial', 10))
+        style.configure('Header.TLabel', font=('Arial', 24, 'bold'), background=self.colors['bg'], foreground='#0c4a6e')
+        
+        # Designed Button Style
+        style.configure('TButton', font=('Arial', 9, 'bold'), padding=(10, 5), borderwidth=0)
+        style.map('TButton', background=[('active', self.colors['ph']), ('!disabled', self.colors['p'])], foreground=[('!disabled', 'white')])
+        
+        style.configure('TLabelframe', background=self.colors['bg'], bordercolor=self.colors['brd'], borderwidth=1)
+        style.configure('TLabelframe.Label', background=self.colors['bg'], foreground=self.colors['p'], font=('Arial', 10, 'bold'))
+        
         self.create_widgets() 
          
     def create_widgets(self): 
@@ -78,52 +100,74 @@ class ImageClassificationSystem:
         main_container.columnconfigure(0, weight=1) 
         main_container.rowconfigure(3, weight=1) 
          
-        # Header 
-        header = ttk.Label(main_container, text="Image Classification System",  
-                          font=('Arial', 18, 'bold')) 
-        header.grid(row=0, column=0, pady=(0, 15)) 
-         
-        subtitle = ttk.Label(main_container, text="Deep Learning Neural Network (TensorFlow/Keras)", 
-                           font=('Arial', 10)) 
-        subtitle.grid(row=1, column=0, pady=(0, 20)) 
+        # Designed Title Section
+        header_frame = ttk.Frame(main_container)
+        header_frame.grid(row=0, column=0, pady=(10, 5), sticky="ew")
+        header_frame.columnconfigure(0, weight=1)
+
+        # Title with accent color
+        title_container = ttk.Frame(header_frame)
+        title_container.grid(row=0, column=0)
+        
+        ttk.Label(title_container, text="Image ", font=('Arial Black', 24), 
+                  foreground=self.colors['txt']).grid(row=0, column=0)
+        ttk.Label(title_container, text="Classification", font=('Arial Black', 24), 
+                  foreground=self.colors['p']).grid(row=0, column=1)
+        ttk.Label(title_container, text=" System", font=('Arial Black', 24), 
+                  foreground=self.colors['txt']).grid(row=0, column=2)
+        
+        # Decorative separator
+        line = tk.Frame(header_frame, height=2, width=100, bg=self.colors['p'])
+        line.grid(row=1, column=0, pady=10)
+
+        subtitle = ttk.Label(header_frame, text="Deep Learning Neural Network (TensorFlow/Keras)", 
+                           font=('Arial', 10), foreground='#6b7280') 
+        subtitle.grid(row=2, column=0, pady=(0, 20)) 
          
         # Control Panel Frame 
-        control_frame = ttk.LabelFrame(main_container, text="Controls", padding="10") 
-        control_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 15)) 
+        control_frame = ttk.LabelFrame(main_container, text=" Controls", padding="15") 
+        control_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=(0, 20)) 
         control_frame.columnconfigure(0, weight=1) 
          
+        # Inner content with subtle background
+        content_box = ttk.Frame(control_frame, style='Box.TFrame')
+        content_box.grid(row=0, column=0, sticky=(tk.W, tk.E), padx=2, pady=2)
+        content_box.columnconfigure(1, weight=1)
+
         # Train Section 
-        train_frame = ttk.Frame(control_frame) 
-        train_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=5) 
+        train_frame = ttk.Frame(content_box, style='Box.TFrame') 
+        train_frame.grid(row=0, column=0, sticky=(tk.W, tk.E), pady=10, padx=10) 
          
-        ttk.Label(train_frame, text="Training:").grid(row=0, column=0, padx=5) 
-        ttk.Button(train_frame, text="Load CSV & Train Model",  
+        ttk.Label(train_frame, text="Neural Network:", style='Box.TLabel').grid(row=0, column=0, padx=5) 
+        ttk.Button(train_frame, text="Initialize & Train System",  
                   command=self.load_and_train).grid(row=0, column=1, padx=5) 
          
         # Classification Section 
-        classify_frame = ttk.Frame(control_frame) 
-        classify_frame.grid(row=1, column=0, sticky=(tk.W, tk.E), pady=5) 
+        classify_frame = ttk.Frame(content_box, style='Box.TFrame') 
+        classify_frame.grid(row=0, column=2, sticky=(tk.W, tk.E), pady=10, padx=10) 
          
-        ttk.Label(classify_frame, text="Classification:").grid(row=0, column=0, padx=5) 
-        ttk.Button(classify_frame, text="Load Single Image",  
+        ttk.Label(classify_frame, text="Single Image:", style='Box.TLabel').grid(row=0, column=0, padx=5) 
+        ttk.Button(classify_frame, text="Run Classification",  
                   command=self.classify_single_image).grid(row=0, column=1, padx=5) 
         
-        # Confidence Threshold Section
-        threshold_frame = ttk.Frame(control_frame)
-        threshold_frame.grid(row=2, column=0, sticky=(tk.W, tk.E), pady=5)
+        # Threshold Slider with styled container
+        threshold_frame = ttk.Frame(content_box, style='Box.TFrame') 
+        threshold_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10), padx=15) 
         
-        ttk.Label(threshold_frame, text="Reject if confidence <").grid(row=0, column=0, padx=5)
+        ttk.Label(threshold_frame, text="Strictness Threshold:", style='Box.TLabel').grid(row=0, column=0, padx=5) 
         self.threshold_var = tk.DoubleVar(value=self.confidence_threshold)
         self.threshold_scale = ttk.Scale(threshold_frame, from_=0, to=1, orient='horizontal',
                                          variable=self.threshold_var, command=self.update_threshold)
         self.threshold_scale.grid(row=0, column=1, padx=5, sticky=(tk.W, tk.E))
         
-        self.threshold_label = ttk.Label(threshold_frame, text=f"{self.confidence_threshold:.0%}", font=('Arial', 11, 'bold'), foreground='red')
+        self.threshold_label = ttk.Label(threshold_frame, text=f"{self.confidence_threshold:.0%}", 
+                                      font=('Arial', 10, 'bold'), foreground=self.colors['p'], style='Box.TLabel')
         self.threshold_label.grid(row=0, column=2, padx=5)
          
-        # Info Label 
-        self.info_label = ttk.Label(control_frame, text="Ready", foreground="gray") 
-        self.info_label.grid(row=3, column=0, pady=(10, 0)) 
+        # Info Label centered at the bottom of the box
+        self.info_label = ttk.Label(content_box, text="READY", foreground=self.colors['p'], 
+                                   font=('Arial', 8, 'bold'), style='Box.TLabel') 
+        self.info_label.grid(row=2, column=0, columnspan=3, pady=(5, 10)) 
          
         # Middle container for side-by-side display 
         mid_container = ttk.Frame(main_container) 
@@ -368,9 +412,9 @@ class ImageClassificationSystem:
         from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score 
          
         acc = accuracy_score(y_true_classes, y_pred_classes) 
-        prec = precision_score(y_true_classes, y_pred_classes, average='weighted') 
-        rec = recall_score(y_true_classes, y_pred_classes, average='weighted') 
-        f1 = f1_score(y_true_classes, y_pred_classes, average='weighted') 
+        prec = precision_score(y_true_classes, y_pred_classes, average='weighted', zero_division=0) 
+        rec = recall_score(y_true_classes, y_pred_classes, average='weighted', zero_division=0) 
+        f1 = f1_score(y_true_classes, y_pred_classes, average='weighted', zero_division=0) 
          
         # Display metrics 
         metrics_container = ttk.Frame(metrics_frame) 
@@ -430,7 +474,7 @@ class ImageClassificationSystem:
         report_text.configure(yscrollcommand=report_scroll.set) 
          
         report = classification_report(y_true_classes, y_pred_classes,  
-                                        target_names=self.class_names) 
+                                        target_names=self.class_names, zero_division=0) 
         report_text.insert(tk.END, "CLASSIFICATION REPORT\n") 
         report_text.insert(tk.END, "="*60 + "\n\n") 
         report_text.insert(tk.END, report) 
@@ -580,6 +624,10 @@ class ImageClassificationSystem:
                         img = img / 255.0  # Normalize 
                         images.append(img) 
                         labels.append(row[label_col]) 
+                        self.dataset_image_ids.add(img_id)
+                        self.dataset_image_ids.add(os.path.basename(img_path))
+                        self.dataset_image_ids.add(img_id)
+                        self.dataset_image_ids.add(os.path.basename(img_path))
                     else: 
                         skipped_images.append(f"{img_id} (corrupted file)") 
                 else: 
@@ -651,11 +699,11 @@ class ImageClassificationSystem:
                                   foreground="orange") 
             self.root.update() 
              
-            # Build model (adjusted for smaller dataset) 
+            # Build model with Augmentation
             self.model = keras.Sequential([ 
-                layers.Conv2D(32, (3, 3), activation='relu', input_shape=(*self.image_size, 3)), 
-                layers.MaxPooling2D((2, 2)), 
-                layers.Conv2D(64, (3, 3), activation='relu'), 
+                layers.RandomFlip("horizontal", input_shape=(*self.image_size, 3)),
+                layers.RandomRotation(0.1),
+                layers.Conv2D(32, (3, 3), activation='relu'), 
                 layers.MaxPooling2D((2, 2)), 
                 layers.Conv2D(64, (3, 3), activation='relu'), 
                 layers.MaxPooling2D((2, 2)), 
@@ -672,20 +720,10 @@ class ImageClassificationSystem:
                 metrics=['accuracy'] 
             ) 
              
-            # Add callbacks 
+            # Callbacks including UI refresh
             callbacks = [ 
-                keras.callbacks.EarlyStopping( 
-                    monitor='val_loss', 
-                    patience=5, 
-                    restore_best_weights=True, 
-                    verbose=1 
-                ), 
-                keras.callbacks.ReduceLROnPlateau( 
-                    monitor='val_loss', 
-                    factor=0.5, 
-                    patience=3, 
-                    verbose=1 
-                ) 
+                keras.callbacks.EarlyStopping(monitor='val_loss', patience=5, restore_best_weights=True),
+                keras.callbacks.LambdaCallback(on_batch_end=lambda *a, **k: self.root.update())
             ] 
              
             # Train model 
@@ -760,7 +798,7 @@ class ImageClassificationSystem:
          
         if file_path: 
             try: 
-                # Check if image is in dataset
+                # Check if image belongs to dataset 
                 image_id = os.path.splitext(os.path.basename(file_path))[0]
                 full_filename = os.path.basename(file_path)
                 
@@ -792,51 +830,24 @@ class ImageClassificationSystem:
                 # Update pie chart
                 self.update_prediction_pie(predictions[0])
                  
-                # Display results 
-                result_text = f"\n{'='*50}\n" 
-                result_text += f"CLASSIFICATION RESULT\n" 
-                result_text += f"{'='*50}\n" 
-                result_text += f"Image: {os.path.basename(file_path)}\n"
+                # Predict and show results
+                p = self.model.predict(img_batch, verbose=0)[0]
+                idx = np.argmax(p); conf = p[idx]; lbl = self.class_names[idx]
+                self.update_prediction_pie(p)
                 
-                # Check if confidence is too low (not in database)
-                if confidence < self.confidence_threshold:
-                    result_text += f" NOT IN DATABASE - Image Not Recognized\n"
-                    result_text += f"{'='*50}\n\n"
-                    result_text += f"  REJECTED: Confidence {confidence:.2%} is below threshold ({self.confidence_threshold:.0%})\n\n"
-                    result_text += f"This image doesn't match any trained class well enough.\n"
-                    result_text += f"Possible reasons:\n"
-                    result_text += f"  • Image is not clothing\n"
-                    result_text += f"  • Image is not in the training dataset\n"
-                    result_text += f"  • Image quality is too different\n\n"
-                    result_text += f"All prediction scores:\n"
-                    for idx in range(len(self.class_names)):
-                        result_text += f"  • {self.class_names[idx]}: {predictions[0][idx]:.2%}\n"
-                    result_text += f"{'='*50}\n\n"
-                    
-                    self.results_text.insert(tk.END, result_text) 
-                    self.results_text.see(tk.END) 
-                    self.info_label.config(text=f" REJECTED - Not in database",  
-                                          foreground="red")
-                    messagebox.showwarning("Not Recognized", 
-                                          f"This image is NOT in the database.\n\n"
-                                          f"Confidence: {confidence:.2%}\n"
-                                          f"Required: {self.confidence_threshold:.0%}")
-                else:
-                    result_text += f"✓ Predicted Class: {predicted_label}\n" 
-                    result_text += f"Confidence: {confidence:.2%}\n\n" 
-                     
-                    # Show top 3 predictions 
-                    result_text += "Top 3 Predictions:\n" 
-                    top_indices = np.argsort(predictions[0])[-3:][::-1] 
-                    for idx in top_indices: 
-                        result_text += f"  • {self.class_names[idx]}: {predictions[0][idx]:.2%}\n" 
-                    result_text += f"{'='*50}\n\n" 
-                     
-                    self.results_text.insert(tk.END, result_text) 
-                    self.results_text.see(tk.END) 
-                     
-                    self.info_label.config(text=f"✓ Classified as: {predicted_label} ({confidence:.2%})",  
-                                          foreground="green") 
+                status = "✓ RECOGNIZED" if conf >= self.confidence_threshold else "⚠ REJECTED: Low Confidence"
+                res = f"\n{'='*40}\n{status}\n{'='*40}\nImg: {os.path.basename(file_path)}\n\n"
+                res += f"PRIMARY RESULT: {lbl}\n"
+                res += f"CONFIDENCE: {conf:.2%}\n\n"
+                
+                res += "TOP 5 PREDICTIONS:\n"
+                top_idx = np.argsort(p)[-5:][::-1]
+                for i in top_idx:
+                    res += f"  • {self.class_names[i]:<15} {p[i]:.2%}\n"
+                
+                self.results_text.insert(tk.END, res + "="*40 + "\n")
+                self.results_text.see(tk.END)
+                self.info_label.config(text=f"{status} ({conf:.1%})" if conf >= self.confidence_threshold else f"⚠ LOW CONFIDENCE: {lbl} ({conf:.1%})")
                  
             except Exception as e: 
                 messagebox.showerror("Error", f"Classification failed: {str(e)}") 
