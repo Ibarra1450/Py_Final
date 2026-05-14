@@ -10,7 +10,9 @@ import os
 import cv2 
 from sklearn.model_selection import train_test_split 
 from sklearn.preprocessing import LabelEncoder 
-from sklearn.metrics import confusion_matrix, classification_report 
+from sklearn.metrics import confusion_matrix, classification_report, accuracy_score, precision_score, recall_score, f1_score
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.linear_model import LogisticRegression
 import matplotlib 
 matplotlib.use('TkAgg') 
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg 
@@ -27,6 +29,8 @@ class ImageClassificationSystem:
          
         # Model and data variables 
         self.model = None 
+        self.dt_model = None  # Decision Tree model
+        self.lr_model = None  # Logistic Regression model
         self.label_encoder = None 
         self.class_names = [] 
         self.image_size = (96, 96)  # Reduced from 160x160 for faster processing
@@ -34,6 +38,9 @@ class ImageClassificationSystem:
         self.class_distribution = {} 
         self.confidence_threshold = 0.85  # Very strict: reject unless 85%+ confident
         self.dataset_image_ids = set()    # Store IDs from the CSV
+        self.model_comparison_results = {}  # Store comparison metrics
+        self.X_val_data = None  # Store validation data for metrics
+        self.y_val_data = None  # Store validation labels for metrics
          
         # Vibrant Sky Blue Palette
         self.colors = {
@@ -150,9 +157,25 @@ class ImageClassificationSystem:
         ttk.Button(classify_frame, text="Run Classification",  
                   command=self.classify_single_image).grid(row=0, column=1, padx=5) 
         
+        # Model Comparison Section
+        comparison_frame = ttk.Frame(content_box, style='Box.TFrame')
+        comparison_frame.grid(row=0, column=3, sticky=(tk.W, tk.E), pady=10, padx=10)
+        
+        ttk.Label(comparison_frame, text="Model Comparison:", style='Box.TLabel').grid(row=0, column=0, padx=5)
+        ttk.Button(comparison_frame, text="View Comparison",
+                  command=self.show_model_comparison).grid(row=0, column=1, padx=5)
+        
+        # Metrics Section
+        metrics_frame = ttk.Frame(content_box, style='Box.TFrame')
+        metrics_frame.grid(row=0, column=4, sticky=(tk.W, tk.E), pady=10, padx=10)
+        
+        ttk.Label(metrics_frame, text="Evaluation:", style='Box.TLabel').grid(row=0, column=0, padx=5)
+        ttk.Button(metrics_frame, text="View Metrics",
+                  command=self.show_stored_metrics).grid(row=0, column=1, padx=5)
+        
         # Threshold Slider with styled container
         threshold_frame = ttk.Frame(content_box, style='Box.TFrame') 
-        threshold_frame.grid(row=1, column=0, columnspan=3, sticky=(tk.W, tk.E), pady=(0, 10), padx=15) 
+        threshold_frame.grid(row=1, column=0, columnspan=5, sticky=(tk.W, tk.E), pady=(0, 10), padx=15) 
         
         ttk.Label(threshold_frame, text="Strictness Threshold:", style='Box.TLabel').grid(row=0, column=0, padx=5) 
         self.threshold_var = tk.DoubleVar(value=self.confidence_threshold)
@@ -167,7 +190,7 @@ class ImageClassificationSystem:
         # Info Label centered at the bottom of the box
         self.info_label = ttk.Label(content_box, text="READY", foreground=self.colors['p'], 
                                    font=('Arial', 8, 'bold'), style='Box.TLabel') 
-        self.info_label.grid(row=2, column=0, columnspan=3, pady=(5, 10)) 
+        self.info_label.grid(row=2, column=0, columnspan=5, pady=(5, 10)) 
          
         # Middle container for side-by-side display 
         mid_container = ttk.Frame(main_container) 
@@ -768,10 +791,88 @@ class ImageClassificationSystem:
             self.update_training_plot(history) 
             self.update_class_distribution(labels) 
              
-            # Show model evaluation metrics 
-            self.show_evaluation_metrics(history, X_val, y_val) 
+            # Train Decision Tree and Logistic Regression models for comparison
+            self.results_text.insert(tk.END, "\n" + "="*50 + "\n")
+            self.results_text.insert(tk.END, "TRAINING ALTERNATIVE MODELS FOR COMPARISON...\n")
+            self.results_text.insert(tk.END, "="*50 + "\n\n")
+            self.root.update()
+            
+            # Flatten images for scikit-learn models (they don't handle 3D arrays well)
+            X_train_flat = X_train.reshape(X_train.shape[0], -1)
+            X_val_flat = X_val.reshape(X_val.shape[0], -1)
+            
+            # Get true labels from one-hot encoding
+            y_train_labels = np.argmax(y_train, axis=1)
+            y_val_labels = np.argmax(y_val, axis=1)
+            
+            # Train Decision Tree
+            self.results_text.insert(tk.END, "Training Decision Tree...\n")
+            self.root.update()
+            try:
+                self.dt_model = DecisionTreeClassifier(max_depth=20, random_state=42, n_jobs=-1)
+                self.dt_model.fit(X_train_flat, y_train_labels)
+                dt_pred = self.dt_model.predict(X_val_flat)
+                dt_accuracy = accuracy_score(y_val_labels, dt_pred)
+                dt_precision = precision_score(y_val_labels, dt_pred, average='weighted', zero_division=0)
+                dt_recall = recall_score(y_val_labels, dt_pred, average='weighted', zero_division=0)
+                dt_f1 = f1_score(y_val_labels, dt_pred, average='weighted', zero_division=0)
+                
+                self.results_text.insert(tk.END, f"✓ Decision Tree Accuracy: {dt_accuracy:.2%}\n\n")
+                self.root.update()
+            except Exception as e:
+                self.results_text.insert(tk.END, f"✗ Decision Tree training failed: {str(e)}\n\n")
+                dt_accuracy = dt_precision = dt_recall = dt_f1 = 0
+            
+            # Train Logistic Regression
+            self.results_text.insert(tk.END, "Training Logistic Regression...\n")
+            self.root.update()
+            try:
+                self.lr_model = LogisticRegression(max_iter=1000, random_state=42, n_jobs=-1)
+                self.lr_model.fit(X_train_flat, y_train_labels)
+                lr_pred = self.lr_model.predict(X_val_flat)
+                lr_accuracy = accuracy_score(y_val_labels, lr_pred)
+                lr_precision = precision_score(y_val_labels, lr_pred, average='weighted', zero_division=0)
+                lr_recall = recall_score(y_val_labels, lr_pred, average='weighted', zero_division=0)
+                lr_f1 = f1_score(y_val_labels, lr_pred, average='weighted', zero_division=0)
+                
+                self.results_text.insert(tk.END, f"✓ Logistic Regression Accuracy: {lr_accuracy:.2%}\n\n")
+                self.root.update()
+            except Exception as e:
+                self.results_text.insert(tk.END, f"✗ Logistic Regression training failed: {str(e)}\n\n")
+                lr_accuracy = lr_precision = lr_recall = lr_f1 = 0
+            
+            # Get Neural Network metrics
+            nn_pred = self.model.predict(X_val, verbose=0)
+            nn_pred_classes = np.argmax(nn_pred, axis=1)
+            nn_accuracy = accuracy_score(y_val_labels, nn_pred_classes)
+            nn_precision = precision_score(y_val_labels, nn_pred_classes, average='weighted', zero_division=0)
+            nn_recall = recall_score(y_val_labels, nn_pred_classes, average='weighted', zero_division=0)
+            nn_f1 = f1_score(y_val_labels, nn_pred_classes, average='weighted', zero_division=0)
+            
+            # Store comparison results
+            self.model_comparison_results = {
+                'Neural Network': {'accuracy': nn_accuracy, 'precision': nn_precision, 'recall': nn_recall, 'f1': nn_f1},
+                'Decision Tree': {'accuracy': dt_accuracy, 'precision': dt_precision, 'recall': dt_recall, 'f1': dt_f1},
+                'Logistic Regression': {'accuracy': lr_accuracy, 'precision': lr_precision, 'recall': lr_recall, 'f1': lr_f1}
+            }
+            
+            self.results_text.insert(tk.END, "\n" + "="*50 + "\n")
+            self.results_text.insert(tk.END, "MODEL COMPARISON SUMMARY\n")
+            self.results_text.insert(tk.END, "="*50 + "\n\n")
+            for model_name, metrics in self.model_comparison_results.items():
+                self.results_text.insert(tk.END, f"{model_name}:\n")
+                self.results_text.insert(tk.END, f"  Accuracy:  {metrics['accuracy']:.2%}\n")
+                self.results_text.insert(tk.END, f"  Precision: {metrics['precision']:.2%}\n")
+                self.results_text.insert(tk.END, f"  Recall:    {metrics['recall']:.2%}\n")
+                self.results_text.insert(tk.END, f"  F1-Score:  {metrics['f1']:.2%}\n\n")
+            
+            self.results_text.see(tk.END) 
+            
+            # Store validation data for later use
+            self.X_val_data = X_val
+            self.y_val_data = y_val
              
-            messagebox.showinfo("Success", f"Model trained successfully!\n\nValidation Accuracy: {val_accuracy:.2%}") 
+            messagebox.showinfo("Success", f"Model trained successfully!\n\nValidation Accuracy: {val_accuracy:.2%}\n\nClick 'View Metrics' or 'View Comparison' buttons to see detailed results.") 
              
         except Exception as e: 
             error_msg = f"Training failed: {str(e)}\n\n" 
@@ -877,6 +978,136 @@ class ImageClassificationSystem:
         # Display on canvas 
         self.canvas.create_image(5, 5, anchor=tk.NW, image=photo) 
         self.canvas.config(scrollregion=self.canvas.bbox(tk.ALL)) 
+    
+    def show_stored_metrics(self):
+        """Show evaluation metrics from stored validation data"""
+        if self.model is None or self.X_val_data is None or self.y_val_data is None:
+            messagebox.showwarning("No Data", "Train a model first to see metrics")
+            return
+        
+        self.show_evaluation_metrics(self.training_history, self.X_val_data, self.y_val_data)
+ 
+    def show_model_comparison(self):
+        """Display model comparison visualization"""
+        if not self.model_comparison_results:
+            messagebox.showwarning("No Data", "Train a model first to see comparison")
+            return
+        
+        comparison_win = tk.Toplevel(self.root)
+        comparison_win.title("Model Performance Comparison")
+        comparison_win.geometry("1400x600")
+        
+        # Main container with three columns
+        main_frame = ttk.Frame(comparison_win)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Column 1: Bar Chart Comparison
+        col1_frame = ttk.LabelFrame(main_frame, text="Metrics Comparison", padding="5")
+        col1_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(0, 5))
+        
+        fig_bar = Figure(figsize=(5, 5), dpi=100, facecolor='white')
+        ax_bar = fig_bar.add_subplot(111)
+        
+        models = list(self.model_comparison_results.keys())
+        metrics_names = ['Accuracy', 'Precision', 'Recall', 'F1-Score']
+        x = np.arange(len(metrics_names))
+        width = 0.25
+        
+        colors = ['#3498db', '#2ecc71', '#e74c3c']  # Blue, Green, Red
+        
+        for i, model in enumerate(models):
+            values = [
+                self.model_comparison_results[model]['accuracy'],
+                self.model_comparison_results[model]['precision'],
+                self.model_comparison_results[model]['recall'],
+                self.model_comparison_results[model]['f1']
+            ]
+            ax_bar.bar(x + i*width, values, width, label=model, color=colors[i], alpha=0.8)
+        
+        ax_bar.set_ylabel('Score', fontsize=10)
+        ax_bar.set_title('All Metrics', fontsize=11, fontweight='bold')
+        ax_bar.set_xticks(x + width)
+        ax_bar.set_xticklabels(metrics_names, fontsize=9)
+        ax_bar.legend(loc='lower right', fontsize=9)
+        ax_bar.grid(True, alpha=0.3, axis='y')
+        ax_bar.set_ylim([0, 1.05])
+        
+        # Add value labels on bars
+        for i, model in enumerate(models):
+            values = [
+                self.model_comparison_results[model]['accuracy'],
+                self.model_comparison_results[model]['precision'],
+                self.model_comparison_results[model]['recall'],
+                self.model_comparison_results[model]['f1']
+            ]
+            for j, v in enumerate(values):
+                ax_bar.text(j + i*width, v + 0.02, f'{v:.0%}', ha='center', va='bottom', fontsize=7)
+        
+        fig_bar.tight_layout()
+        canvas_bar = FigureCanvasTkAgg(fig_bar, col1_frame)
+        canvas_bar.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # Column 2: Accuracy Comparison
+        col2_frame = ttk.LabelFrame(main_frame, text="Accuracy Comparison", padding="5")
+        col2_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5)
+        
+        fig_radar = Figure(figsize=(5, 5), dpi=100, facecolor='white')
+        ax_radar = fig_radar.add_subplot(111)
+        
+        models_list = list(self.model_comparison_results.keys())
+        accuracies = [self.model_comparison_results[m]['accuracy'] for m in models_list]
+        
+        bars = ax_radar.barh(models_list, accuracies, color=colors, alpha=0.7)
+        ax_radar.set_xlabel('Accuracy', fontsize=10)
+        ax_radar.set_title('Accuracy Comparison', fontsize=11, fontweight='bold')
+        ax_radar.set_xlim([0, 1.05])
+        ax_radar.grid(True, alpha=0.3, axis='x')
+        
+        # Add value labels
+        for i, (bar, acc) in enumerate(zip(bars, accuracies)):
+            ax_radar.text(acc + 0.02, i, f'{acc:.2%}', va='center', fontsize=10, fontweight='bold')
+        
+        fig_radar.tight_layout()
+        canvas_radar = FigureCanvasTkAgg(fig_radar, col2_frame)
+        canvas_radar.get_tk_widget().pack(fill=tk.BOTH, expand=True)
+        
+        # Column 3: Summary Table
+        col3_frame = ttk.LabelFrame(main_frame, text="Summary Table", padding="5")
+        col3_frame.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 0))
+        
+        table_container = ttk.Frame(col3_frame)
+        table_container.pack(fill=tk.BOTH, expand=True)
+        
+        table_text = tk.Text(table_container, wrap=tk.WORD, font=('Courier', 8))
+        table_text.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        table_scroll = ttk.Scrollbar(table_container, orient="vertical", command=table_text.yview)
+        table_scroll.pack(side=tk.RIGHT, fill=tk.Y)
+        table_text.configure(yscrollcommand=table_scroll.set)
+        
+        # Create formatted table
+        table_content = "\n─────────────────────────────\n"
+        table_content += "  MODEL COMPARISON SUMMARY   \n"
+        table_content += "─────────────────────────────\n"
+        
+        # Find best model for each metric
+        best_accuracy = max(self.model_comparison_results.items(), key=lambda x: x[1]['accuracy'])
+        
+        for model, metrics in self.model_comparison_results.items():
+            is_best = "" if model == best_accuracy[0] else " "
+            table_content += f" {is_best} {model:<23} \n"
+            table_content += f"  Acc:  {metrics['accuracy']:.2%}              \n"
+            table_content += f"  Prec: {metrics['precision']:.2%}              \n"
+            table_content += f"  Rec:  {metrics['recall']:.2%}              \n"
+            table_content += f"  F1:   {metrics['f1']:.2%}              \n"
+            table_content += "─────────────────────────────\n"
+        
+        table_content += f" BEST: {best_accuracy[0]:<18} \n"
+        table_content += f" ACC:  {best_accuracy[1]['accuracy']:.2%}            \n"
+        table_content += "─────────────────────────────\n"
+        
+        table_text.insert(tk.END, table_content)
+        table_text.config(state=tk.DISABLED)
  
  
 def main(): 
